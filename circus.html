@@ -1,0 +1,1342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CIRCUS OF SHADOWS // Roblox-Style Horror</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050507;
+            font-family: 'Fredoka', sans-serif;
+            touch-action: none;
+        }
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* Roblox-inspired Topbar & UI */
+        .rbx-glass {
+            background: rgba(20, 22, 26, 0.78);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .rbx-btn {
+            transition: transform 0.1s ease, background-color 0.15s ease;
+        }
+        .rbx-btn:active {
+            transform: scale(0.95);
+        }
+        .vignette {
+            background: radial-gradient(circle, rgba(0,0,0,0) 45%, rgba(0,0,0,0.88) 100%);
+            pointer-events: none;
+        }
+        .danger-vignette {
+            background: radial-gradient(circle, rgba(180,0,0,0) 35%, rgba(160,0,0,0.65) 100%);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 0.8; }
+            50% { opacity: 0.3; }
+        }
+        .animate-pulse-slow {
+            animation: pulse-slow 2s infinite;
+        }
+        @keyframes jumpscare-shake {
+            0% { transform: translate(0, 0) scale(1.05) rotate(0deg); }
+            15% { transform: translate(-18px, 14px) scale(1.22) rotate(-4deg); }
+            30% { transform: translate(16px, -16px) scale(1.28) rotate(5deg); }
+            45% { transform: translate(-14px, -12px) scale(1.35) rotate(-3deg); }
+            60% { transform: translate(20px, 12px) scale(1.4) rotate(4deg); }
+            75% { transform: translate(-12px, 18px) scale(1.45) rotate(-5deg); }
+            90% { transform: translate(14px, -14px) scale(1.5) rotate(3deg); }
+            100% { transform: translate(0, 0) scale(1.55) rotate(0deg); }
+        }
+        @keyframes strobe-flash {
+            0%, 100% { background-color: #090000; }
+            25% { background-color: #7f1d1d; }
+            50% { background-color: #000000; }
+            75% { background-color: #991b1b; }
+        }
+        .jumpscare-active {
+            animation: strobe-flash 0.14s infinite;
+        }
+        .clown-face-zoom {
+            animation: jumpscare-shake 0.12s infinite;
+        }
+        /* Mobile Joystick */
+        #joystick-zone {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            position: relative;
+        }
+        #joystick-knob {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.65);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body class="text-white">
+
+    <!-- 3D Viewport -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Screen Overlays -->
+    <div class="fixed inset-0 vignette z-10"></div>
+    <div id="danger-overlay" class="fixed inset-0 danger-vignette z-10"></div>
+
+    <!-- Roblox Style Top Bar -->
+    <div id="hud-topbar" class="fixed top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none hidden">
+        <div class="flex items-center gap-2 pointer-events-auto">
+            <!-- Roblox Menu Icon Mock -->
+            <button id="btn-pause" class="rbx-glass rbx-btn w-10 h-10 rounded-xl flex items-center justify-center hover:bg-white/10" title="Menu">
+                <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M5.5 3L21 6.5L18.5 21L3 17.5L5.5 3ZM10.5 10L9.8 14L13.8 14.7L14.5 10.7L10.5 10Z"/>
+                </svg>
+            </button>
+            <!-- Objective Tracker -->
+            <div class="rbx-glass px-4 py-2 rounded-xl flex items-center gap-3">
+                <div class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></div>
+                <div>
+                    <div class="text-[11px] uppercase tracking-wider text-zinc-400 font-bold">Objective</div>
+                    <div id="objective-text" class="text-sm font-semibold text-white">Find 5 Golden Tickets (0/5)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right HUD: Stamina & Battery -->
+        <div class="flex items-center gap-2 sm:gap-3 pointer-events-auto">
+            <!-- Flashlight Battery -->
+            <div class="rbx-glass px-3 py-2 rounded-xl flex items-center gap-2">
+                <svg id="flashlight-icon" class="w-5 h-5 text-amber-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                </svg>
+                <div class="w-16 sm:w-24 h-2.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div id="battery-bar" class="h-full bg-amber-400 transition-all duration-150" style="width: 100%"></div>
+                </div>
+            </div>
+
+            <!-- Stamina Bar -->
+            <div class="rbx-glass px-3 py-2 rounded-xl flex items-center gap-2">
+                <svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                <div class="w-16 sm:w-24 h-2.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div id="stamina-bar" class="h-full bg-sky-400 transition-all duration-75" style="width: 100%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Center Crosshair & Interaction Prompt -->
+    <div id="crosshair-container" class="fixed inset-0 flex flex-col items-center justify-center pointer-events-none z-20 hidden">
+        <div id="crosshair" class="w-1.5 h-1.5 rounded-full bg-white/70 shadow"></div>
+        <div id="interact-prompt" class="mt-4 rbx-glass px-3 py-1.5 rounded-lg text-xs font-semibold tracking-wide text-amber-300 hidden">
+            [E] or TAP to Grab Ticket
+        </div>
+    </div>
+
+    <!-- Full-Screen Evil Clown Jumpscare Overlay -->
+    <div id="jumpscare-screen" class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden hidden jumpscare-active">
+        <div class="clown-face-zoom w-full h-full flex items-center justify-center p-4">
+            <!-- Blocky Roblox-Style Evil Clown SVG Jumpscare Face -->
+            <svg viewBox="0 0 400 400" class="w-full max-w-lg h-auto drop-shadow-[0_0_45px_rgba(255,0,0,0.95)]">
+                <!-- Jester Hat -->
+                <polygon points="80,120 30,20 165,85" fill="#7e22ce" stroke="#18181b" stroke-width="6"/>
+                <polygon points="320,120 370,20 235,85" fill="#dc2626" stroke="#18181b" stroke-width="6"/>
+                <circle cx="30" cy="20" r="16" fill="#facc15"/>
+                <circle cx="370" cy="20" r="16" fill="#facc15"/>
+                <!-- Wild Red Hair Tufts -->
+                <circle cx="65" cy="175" r="42" fill="#b91c1c"/>
+                <circle cx="55" cy="225" r="38" fill="#991b1b"/>
+                <circle cx="335" cy="175" r="42" fill="#b91c1c"/>
+                <circle cx="345" cy="225" r="38" fill="#991b1b"/>
+                <!-- Blocky Roblox Head -->
+                <rect x="85" y="85" width="230" height="250" rx="34" fill="#f4f4f5" stroke="#18181b" stroke-width="8"/>
+                <!-- Dark Eye Sockets & Triangles -->
+                <polygon points="145,120 115,155 175,155" fill="#1d4ed8"/>
+                <polygon points="255,120 225,155 285,155" fill="#1d4ed8"/>
+                <polygon points="145,235 118,205 172,205" fill="#1d4ed8"/>
+                <polygon points="255,235 228,205 282,205" fill="#1d4ed8"/>
+                <!-- Glowing Demonic Eyes -->
+                <ellipse cx="145" cy="180" rx="26" ry="22" fill="#09090b"/>
+                <ellipse cx="255" cy="180" rx="26" ry="22" fill="#09090b"/>
+                <circle cx="145" cy="180" r="10" fill="#ff0000"/>
+                <circle cx="255" cy="180" r="10" fill="#ff0000"/>
+                <circle cx="148" cy="177" r="3" fill="#ffffff"/>
+                <circle cx="258" cy="177" r="3" fill="#ffffff"/>
+                <!-- Sinister Eyebrows -->
+                <line x1="110" y1="142" x2="180" y2="165" stroke="#09090b" stroke-width="10" stroke-linecap="round"/>
+                <line x1="290" y1="142" x2="220" y2="165" stroke="#09090b" stroke-width="10" stroke-linecap="round"/>
+                <!-- Big Red Clown Nose -->
+                <circle cx="200" cy="218" r="26" fill="#ef4444" stroke="#7f1d1d" stroke-width="4"/>
+                <ellipse cx="192" cy="210" rx="8" ry="5" fill="#fca5a5" transform="rotate(-25 192 210)"/>
+                <!-- Terrifying Wide Jagged Mouth -->
+                <path d="M 112 248 Q 200 345 288 248 Q 200 285 112 248 Z" fill="#450a0a" stroke="#dc2626" stroke-width="12" stroke-linejoin="round"/>
+                <!-- Sharp Teeth -->
+                <polygon points="135,263 148,288 160,267" fill="#fef08a"/>
+                <polygon points="168,270 180,298 192,273" fill="#fef08a"/>
+                <polygon points="208,273 220,298 232,270" fill="#fef08a"/>
+                <polygon points="240,267 252,288 265,263" fill="#fef08a"/>
+                <polygon points="152,295 165,274 178,299" fill="#fef08a"/>
+                <polygon points="222,299 235,274 248,295" fill="#fef08a"/>
+            </svg>
+        </div>
+    </div>
+
+    <!-- Mobile Controls (Visible on Touch Devices) -->
+    <div id="mobile-controls" class="fixed bottom-6 left-6 right-6 z-20 flex items-end justify-between pointer-events-none hidden">
+        <!-- Left: Virtual Joystick -->
+        <div id="joystick-zone" class="pointer-events-auto">
+            <div id="joystick-knob"></div>
+        </div>
+
+        <!-- Right: Action Buttons -->
+        <div class="flex flex-col gap-3 pointer-events-auto">
+            <button id="btn-mobile-interact" class="rbx-glass rbx-btn w-14 h-14 rounded-2xl flex flex-col items-center justify-center border-amber-400/50 hidden">
+                <span class="text-xs font-bold text-amber-300">GRAB</span>
+            </button>
+            <div class="flex gap-3">
+                <button id="btn-mobile-flash" class="rbx-glass rbx-btn w-14 h-14 rounded-2xl flex flex-col items-center justify-center">
+                    <svg class="w-6 h-6 text-amber-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                    <span class="text-[10px] font-bold mt-0.5">LIGHT</span>
+                </button>
+                <button id="btn-mobile-sprint" class="rbx-glass rbx-btn w-14 h-14 rounded-2xl flex flex-col items-center justify-center">
+                    <svg class="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                    <span class="text-[10px] font-bold mt-0.5">RUN</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start / Lobby Modal (Roblox Experience Card Style) -->
+    <div id="menu-screen" class="fixed inset-0 z-30 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div class="rbx-glass max-w-md w-full rounded-3xl p-6 sm:p-8 shadow-2xl border border-white/15">
+            <div class="flex items-center gap-2 mb-3">
+                <span class="px-2.5 py-0.5 rounded-md bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold uppercase tracking-wider">Circus Horror</span>
+                <span class="px-2.5 py-0.5 rounded-md bg-zinc-800 text-zinc-300 text-xs font-semibold">13+</span>
+            </div>
+            
+            <h1 class="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-2">CIRCUS OF SHADOWS</h1>
+            <p class="text-zinc-400 text-sm leading-relaxed mb-6">
+                The carnival tents are locked after midnight. Find all <span class="text-amber-300 font-semibold">5 Golden VIP Tickets</span> hidden inside the big top to unlock the <span class="text-emerald-400 font-semibold">Exit Gate</span>. Beware of <span class="text-red-400 font-semibold">Bobo the Clown</span> roaming the maze.
+            </p>
+
+            <!-- Controls Guide -->
+            <div class="bg-black/40 rounded-2xl p-4 mb-6 border border-white/5 space-y-2 text-xs text-zinc-300">
+                <div class="flex justify-between">
+                    <span class="text-zinc-500 font-semibold">MOVE / LOOK</span>
+                    <span class="font-mono text-white">WASD + Mouse (or Touch)</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-zinc-500 font-semibold">SPRINT</span>
+                    <span class="font-mono text-white">SHIFT</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-zinc-500 font-semibold">FLASHLIGHT</span>
+                    <span class="font-mono text-white">F / Right Click</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-zinc-500 font-semibold">GRAB TICKET</span>
+                    <span class="font-mono text-white">E / Left Click</span>
+                </div>
+            </div>
+
+            <button id="btn-play" class="w-full py-4 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-bold text-lg shadow-lg shadow-red-600/30 rbx-btn flex items-center justify-center gap-2">
+                <svg class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                ENTER THE CIRCUS
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over / Victory Screen -->
+    <div id="end-screen" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg hidden">
+        <div class="rbx-glass max-w-md w-full rounded-3xl p-8 text-center border border-white/15">
+            <div id="end-badge" class="inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mb-3 bg-red-500/20 text-red-400">
+                ELIMINATED
+            </div>
+            <h2 id="end-title" class="text-3xl sm:text-4xl font-bold text-white mb-2">YOU WERE CAUGHT</h2>
+            <p id="end-desc" class="text-zinc-400 text-sm mb-6">The Entity found you in the dark.</p>
+            
+            <div class="grid grid-cols-2 gap-3 mb-6">
+                <div class="bg-black/40 rounded-2xl p-3 border border-white/5">
+                    <div class="text-xs text-zinc-500 uppercase font-bold">Tickets Found</div>
+                    <div id="stat-tapes" class="text-xl font-bold text-amber-400 mt-0.5">0 / 5</div>
+                </div>
+                <div class="bg-black/40 rounded-2xl p-3 border border-white/5">
+                    <div class="text-xs text-zinc-500 uppercase font-bold">Time Survived</div>
+                    <div id="stat-time" class="text-xl font-bold text-sky-400 mt-0.5">00:00</div>
+                </div>
+            </div>
+
+            <button id="btn-restart" class="w-full py-4 rounded-2xl bg-white hover:bg-zinc-200 text-zinc-950 font-bold text-base rbx-btn">
+                PLAY AGAIN
+            </button>
+        </div>
+    </div>
+
+    <!-- Custom Notification Toast -->
+    <div id="toast-msg" class="fixed top-20 left-1/2 -translate-x-1/2 z-30 rbx-glass px-4 py-2 rounded-full text-xs font-semibold text-white opacity-0 transition-opacity duration-300 pointer-events-none">
+        Notification
+    </div>
+
+    <script>
+        /**
+         * CIRCUS OF SHADOWS
+         * A self-contained 3D Roblox-inspired Circus Survival Horror Experience
+         */
+
+        // --- SOUND ENGINE (Tone.js) ---
+        class HorrorAudio {
+            constructor() {
+                this.initialized = false;
+                this.heartbeatTimer = 0;
+            }
+
+            async init() {
+                if (this.initialized) return;
+                await Tone.start();
+                
+                // Eerie haunted calliope / carnival drone
+                this.drone = new Tone.FatOscillator("D1", "sawtooth", 25).toDestination();
+                const filter = new Tone.Filter(110, "lowpass").toDestination();
+                this.drone.disconnect();
+                this.drone.connect(filter);
+                this.drone.volume.value = -18;
+                this.drone.start();
+
+                // Click / Flashlight toggle synth
+                this.clickSynth = new Tone.MembraneSynth({
+                    pitchDecay: 0.01,
+                    octaves: 2,
+                    envelope: { attack: 0.001, decay: 0.05, sustain: 0 }
+                }).toDestination();
+                this.clickSynth.volume.value = -10;
+
+                // Ticket pickup chime
+                this.pickupSynth = new Tone.PolySynth(Tone.Synth).toDestination();
+                this.pickupSynth.volume.value = -8;
+
+                // Heartbeat synth
+                this.heartSynth = new Tone.MembraneSynth({
+                    pitchDecay: 0.05,
+                    octaves: 3,
+                    envelope: { attack: 0.01, decay: 0.2, sustain: 0 }
+                }).toDestination();
+                this.heartSynth.volume.value = -6;
+
+                // Clown Jumpscare Screech & Warped Horn
+                this.scareNoise = new Tone.NoiseSynth({
+                    noise: { type: 'white' },
+                    envelope: { attack: 0.005, decay: 1.1, sustain: 0.2, release: 0.3 }
+                }).toDestination();
+                this.scareNoise.volume.value = 0;
+
+                this.clownHorn = new Tone.PolySynth(Tone.Sawtooth).toDestination();
+                this.clownHorn.volume.value = -2;
+
+                this.initialized = true;
+            }
+
+            playClick() {
+                if (!this.initialized) return;
+                this.clickSynth.triggerAttackRelease("C5", "32n");
+            }
+
+            playPickup() {
+                if (!this.initialized) return;
+                this.pickupSynth.triggerAttackRelease(["C5", "E5", "G5"], "8n");
+            }
+
+            playHeartbeat(intensity) {
+                if (!this.initialized) return;
+                this.heartSynth.volume.value = -18 + (intensity * 16);
+                this.heartSynth.triggerAttackRelease("C1", "16n");
+                setTimeout(() => {
+                    if (this.initialized) this.heartSynth.triggerAttackRelease("G0", "16n");
+                }, 160);
+            }
+
+            playClownJumpscare() {
+                if (!this.initialized) return;
+                this.scareNoise.triggerAttackRelease("1n");
+                // Discordant terrifying circus horn blast
+                this.clownHorn.triggerAttackRelease(["C#2", "D2", "G#4", "A4"], "1n");
+                this.heartSynth.triggerAttackRelease("C1", "2n");
+            }
+        }
+
+        // --- MAP & LEVEL DESIGN ---
+        // 1 = Wall, 0 = Floor, 2 = Player Spawn, 3 = Tape Spawn, 4 = Exit Door
+        const CELL_SIZE = 6;
+        const WALL_HEIGHT = 5.5;
+        const LEVEL_MAP = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,2,0,0,1,0,0,0,0,0,1,3,0,0,1],
+            [1,0,1,0,1,0,1,1,1,0,1,0,1,0,1],
+            [1,0,1,0,0,0,0,0,1,0,0,0,1,0,1],
+            [1,0,1,1,1,1,1,0,1,1,1,0,1,0,1],
+            [1,3,0,0,0,0,1,0,0,0,0,0,0,0,1],
+            [1,1,1,0,1,0,1,1,1,0,1,1,1,0,1],
+            [1,0,0,0,1,0,0,3,0,0,1,0,0,0,1],
+            [1,0,1,1,1,1,1,0,1,1,1,0,1,1,1],
+            [1,0,0,0,0,0,0,0,1,0,0,0,0,3,1],
+            [1,1,1,0,1,1,1,0,1,0,1,1,1,0,1],
+            [1,3,0,0,1,0,0,0,0,0,1,0,0,0,1],
+            [1,0,1,1,1,0,1,1,1,1,1,0,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,1,4,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        // --- MAIN GAME CONTROLLER ---
+        class HorrorGame {
+            constructor() {
+                this.canvas = document.getElementById('game-canvas');
+                this.audio = new HorrorAudio();
+                
+                // Game State
+                this.isPlaying = false;
+                this.isGameOver = false;
+                this.startTime = 0;
+                this.elapsedTime = 0;
+                
+                // Player State
+                this.playerPos = new THREE.Vector3();
+                this.playerRadius = 0.85;
+                this.yaw = 0;
+                this.pitch = 0;
+                this.stamina = 100;
+                this.battery = 100;
+                this.flashlightOn = true;
+                this.isSprinting = false;
+                this.bobTimer = 0;
+
+                // Collectibles & Exit
+                this.tapes = [];
+                this.tapesCollected = 0;
+                this.totalTapes = 5;
+                this.exitDoor = null;
+                this.exitUnlocked = false;
+                this.targetedTape = null;
+
+                // Input State
+                this.keys = {};
+                this.joyVector = { x: 0, y: 0 };
+                this.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+                // Monster State
+                this.monster = null;
+                this.monsterSpeed = 4.6;
+                this.monsterTarget = new THREE.Vector3();
+                this.monsterPathTimer = 0;
+
+                this.initThree();
+                this.buildLevel();
+                this.bindEvents();
+                this.animate = this.animate.bind(this);
+            }
+
+            initThree() {
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x070305);
+                this.scene.fog = new THREE.FogExp2(0x070305, 0.068);
+
+                this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 60);
+                
+                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+                // Subtle Ambient Light (barely visible in pitch black)
+                const ambient = new THREE.AmbientLight(0x161a24, 0.35);
+                this.scene.add(ambient);
+
+                // Player Flashlight (SpotLight attached to camera)
+                this.flashlight = new THREE.SpotLight(0xfff4d6, 3.2, 32, Math.PI / 4.8, 0.45, 1.2);
+                this.flashlight.position.set(0, 0, 0);
+                this.flashlight.target.position.set(0, 0, -1);
+                this.flashlight.castShadow = true;
+                this.flashlight.shadow.mapSize.width = 1024;
+                this.flashlight.shadow.mapSize.height = 1024;
+                this.flashlight.shadow.camera.near = 0.5;
+                this.flashlight.shadow.camera.far = 32;
+
+                this.camera.add(this.flashlight);
+                this.camera.add(this.flashlight.target);
+                this.scene.add(this.camera);
+
+                // Subtle self-glow so player isn't completely blind if battery dies
+                this.dimAura = new THREE.PointLight(0x334155, 0.45, 5.5);
+                this.camera.add(this.dimAura);
+            }
+
+            // Procedural Circus Tent Stripes & Checkerboard Textures
+            createCircusWallTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+
+                // Classic faded red & cream circus tent vertical stripes
+                const stripeW = 32;
+                for (let x = 0; x < 256; x += stripeW) {
+                    ctx.fillStyle = (x / stripeW) % 2 === 0 ? '#5c1414' : '#786b59';
+                    ctx.fillRect(x, 0, stripeW, 256);
+                }
+
+                // Grime & wear overlay
+                for (let i = 0; i < 1600; i++) {
+                    ctx.fillStyle = Math.random() > 0.5 ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.03)';
+                    ctx.fillRect(Math.random() * 256, Math.random() * 256, 3, 3);
+                }
+
+                // Roblox stud border
+                ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+                ctx.lineWidth = 4;
+                ctx.strokeRect(2, 2, 252, 252);
+
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                return tex;
+            }
+
+            createCheckerFloorTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+
+                const tile = 64;
+                for (let y = 0; y < 256; y += tile) {
+                    for (let x = 0; x < 256; x += tile) {
+                        const isDark = ((x + y) / tile) % 2 === 0;
+                        ctx.fillStyle = isDark ? '#141316' : '#2d2824';
+                        ctx.fillRect(x, y, tile, tile);
+                    }
+                }
+
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                return tex;
+            }
+
+            buildLevel() {
+                // Clear existing level objects if restarting
+                if (this.levelGroup) {
+                    this.scene.remove(this.levelGroup);
+                }
+                this.levelGroup = new THREE.Group();
+                this.walls = [];
+                this.tapes = [];
+
+                const mapRows = LEVEL_MAP.length;
+                const mapCols = LEVEL_MAP[0].length;
+                const totalW = mapCols * CELL_SIZE;
+                const totalD = mapRows * CELL_SIZE;
+
+                // Checkerboard Carnival Floor & Dark Tent Ceiling
+                const floorTex = this.createCheckerFloorTexture();
+                floorTex.repeat.set(mapCols * 2, mapRows * 2);
+                const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85, metalness: 0.1 });
+                const floor = new THREE.Mesh(new THREE.PlaneGeometry(totalW, totalD), floorMat);
+                floor.rotation.x = -Math.PI / 2;
+                floor.position.set(totalW / 2 - CELL_SIZE / 2, 0, totalD / 2 - CELL_SIZE / 2);
+                floor.receiveShadow = true;
+                this.levelGroup.add(floor);
+
+                const ceilMat = new THREE.MeshStandardMaterial({ color: 0x170909, roughness: 0.9 });
+                const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(totalW, totalD), ceilMat);
+                ceiling.rotation.x = Math.PI / 2;
+                ceiling.position.set(totalW / 2 - CELL_SIZE / 2, WALL_HEIGHT, totalD / 2 - CELL_SIZE / 2);
+                this.levelGroup.add(ceiling);
+
+                // Circus Tent Striped Wall Material
+                const wallTex = this.createCircusWallTexture();
+                const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.78 });
+                const trimMat = new THREE.MeshStandardMaterial({ color: 0x2b1810, roughness: 0.6 });
+
+                const wallGeo = new THREE.BoxGeometry(CELL_SIZE, WALL_HEIGHT, CELL_SIZE);
+                const trimGeo = new THREE.BoxGeometry(CELL_SIZE + 0.1, 0.45, CELL_SIZE + 0.1);
+
+                // Parse Map Grid
+                for (let r = 0; r < mapRows; r++) {
+                    for (let c = 0; c < mapCols; c++) {
+                        const cell = LEVEL_MAP[r][c];
+                        const wx = c * CELL_SIZE;
+                        const wz = r * CELL_SIZE;
+
+                        if (cell === 1) {
+                            const wall = new THREE.Mesh(wallGeo, wallMat);
+                            wall.position.set(wx, WALL_HEIGHT / 2, wz);
+                            wall.castShadow = true;
+                            wall.receiveShadow = true;
+                            this.levelGroup.add(wall);
+
+                            // Baseboard trim for industrial Roblox facility vibe
+                            const trim = new THREE.Mesh(trimGeo, trimMat);
+                            trim.position.set(wx, 0.22, wz);
+                            this.levelGroup.add(trim);
+
+                            this.walls.push({
+                                minX: wx - CELL_SIZE / 2,
+                                maxX: wx + CELL_SIZE / 2,
+                                minZ: wz - CELL_SIZE / 2,
+                                maxZ: wz + CELL_SIZE / 2
+                            });
+                        } else if (cell === 2) {
+                            // Player Spawn
+                            this.playerPos.set(wx, 2.2, wz);
+                        } else if (cell === 3) {
+                            // Golden VIP Circus Ticket
+                            this.spawnTape(wx, wz);
+                        } else if (cell === 4) {
+                            // Circus Exit Gate
+                            this.spawnExitDoor(wx, wz);
+                        }
+                    }
+                }
+
+                // Spawn The Evil Clown far from player
+                this.spawnMonster(13 * CELL_SIZE, 11 * CELL_SIZE);
+
+                this.scene.add(this.levelGroup);
+            }
+
+            spawnTape(x, z) {
+                const tapeGroup = new THREE.Group();
+                
+                // Circus Barrel / Crate Pedestal
+                const crate = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.65, 0.7, 1.1, 12),
+                    new THREE.MeshStandardMaterial({ color: 0x3b1d14, roughness: 0.75 })
+                );
+                crate.position.y = 0.55;
+                crate.castShadow = true;
+                crate.receiveShadow = true;
+                tapeGroup.add(crate);
+
+                // Glowing Golden Circus Ticket
+                const tapeMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.75, 0.08, 0.4),
+                    new THREE.MeshStandardMaterial({
+                        color: 0xfacc15,
+                        emissive: 0xeab308,
+                        emissiveIntensity: 0.9
+                    })
+                );
+                tapeMesh.position.y = 1.35;
+                tapeGroup.add(tapeMesh);
+
+                // Beacon light so player can spot tickets in dark tents
+                const light = new THREE.PointLight(0xfbbf24, 1.1, 6.5);
+                light.position.y = 1.8;
+                tapeGroup.add(light);
+
+                tapeGroup.position.set(x, 0, z);
+                this.levelGroup.add(tapeGroup);
+
+                this.tapes.push({
+                    group: tapeGroup,
+                    mesh: tapeMesh,
+                    light: light,
+                    collected: false,
+                    pos: new THREE.Vector3(x, 1.35, z)
+                });
+            }
+
+            spawnExitDoor(x, z) {
+                const doorGroup = new THREE.Group();
+                
+                const doorFrame = new THREE.Mesh(
+                    new THREE.BoxGeometry(CELL_SIZE * 0.9, WALL_HEIGHT * 0.9, 0.6),
+                    new THREE.MeshStandardMaterial({ color: 0x18181b, metalness: 0.5, roughness: 0.4 })
+                );
+                doorFrame.position.y = (WALL_HEIGHT * 0.9) / 2;
+                doorGroup.add(doorFrame);
+
+                // Status Sign above door
+                this.exitSignMat = new THREE.MeshStandardMaterial({
+                    color: 0xef4444,
+                    emissive: 0xdc2626,
+                    emissiveIntensity: 1.2
+                });
+                const sign = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.55, 0.75), this.exitSignMat);
+                sign.position.y = 4.2;
+                doorGroup.add(sign);
+
+                this.exitLight = new THREE.PointLight(0xef4444, 1.6, 10);
+                this.exitLight.position.set(0, 4.0, -1.2);
+                doorGroup.add(this.exitLight);
+
+                doorGroup.position.set(x, 0, z);
+                this.levelGroup.add(doorGroup);
+                this.exitDoor = new THREE.Vector3(x, 0, z);
+            }
+
+            spawnMonster(x, z) {
+                // Classic Blocky Roblox R6-Inspired Evil Circus Clown
+                const group = new THREE.Group();
+
+                const suitRedMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.45 });
+                const suitPurpleMat = new THREE.MeshStandardMaterial({ color: 0x4c1d95, roughness: 0.45 });
+                const whiteFaceMat = new THREE.MeshStandardMaterial({ color: 0xf4f4f5, roughness: 0.35 });
+                const collarMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.5 });
+
+                // Clown Torso
+                const torso = new THREE.Mesh(new THREE.BoxGeometry(1.55, 2.1, 0.85), suitRedMat);
+                torso.position.y = 2.6;
+                group.add(torso);
+
+                // Pom-pom buttons on torso
+                const pomMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+                const pom1 = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), pomMat);
+                pom1.position.set(0, 3.0, 0.45);
+                const pom2 = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), pomMat);
+                pom2.position.set(0, 2.3, 0.45);
+                group.add(pom1, pom2);
+
+                // Ruffled Clown Neck Collar
+                const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.95, 0.25, 12), collarMat);
+                collar.position.y = 3.68;
+                group.add(collar);
+
+                // White Painted Roblox Block Head
+                const head = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 1.1), whiteFaceMat);
+                head.position.y = 4.3;
+                group.add(head);
+
+                // Jester / Clown Hat Cone
+                const hat = new THREE.Mesh(new THREE.ConeGeometry(0.65, 1.1, 8), suitPurpleMat);
+                hat.position.set(0, 5.3, 0);
+                group.add(hat);
+
+                // Big Glowing Red Clown Nose
+                const noseMat = new THREE.MeshBasicMaterial({ color: 0xff1111 });
+                const nose = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 10), noseMat);
+                nose.position.set(0, 4.25, 0.62);
+                group.add(nose);
+
+                // Glowing Evil Eyes
+                const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                const leftEye = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.1), eyeMat);
+                leftEye.position.set(-0.26, 4.48, 0.55);
+                const rightEye = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.1), eyeMat);
+                rightEye.position.set(0.26, 4.48, 0.55);
+                group.add(leftEye, rightEye);
+
+                // Sinister Red Smile Bar
+                const smile = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.14, 0.08), noseMat);
+                smile.position.set(0, 3.96, 0.55);
+                group.add(smile);
+
+                // Long Striped Clown Arms
+                const armGeo = new THREE.BoxGeometry(0.55, 2.3, 0.55);
+                this.leftArm = new THREE.Mesh(armGeo, suitPurpleMat);
+                this.leftArm.position.set(-1.12, 2.5, 0.2);
+                this.leftArm.rotation.x = -0.35;
+
+                this.rightArm = new THREE.Mesh(armGeo, suitPurpleMat);
+                this.rightArm.position.set(1.12, 2.5, 0.2);
+                this.rightArm.rotation.x = -0.35;
+                group.add(this.leftArm, this.rightArm);
+
+                // Clown Legs
+                const legGeo = new THREE.BoxGeometry(0.65, 1.6, 0.65);
+                this.leftLeg = new THREE.Mesh(legGeo, suitRedMat);
+                this.leftLeg.position.set(-0.42, 0.8, 0);
+                this.rightLeg = new THREE.Mesh(legGeo, suitRedMat);
+                this.rightLeg.position.set(0.42, 0.8, 0);
+                group.add(this.leftLeg, this.rightLeg);
+
+                // Eerie Red Circus Aura
+                const monsterLight = new THREE.PointLight(0xdc2626, 1.9, 9.5);
+                monsterLight.position.set(0, 3.2, 0.6);
+                group.add(monsterLight);
+
+                group.position.set(x, 0, z);
+                this.levelGroup.add(group);
+                this.monster = group;
+            }
+
+            showToast(msg) {
+                const toast = document.getElementById('toast-msg');
+                toast.textContent = msg;
+                toast.classList.remove('opacity-0');
+                clearTimeout(this.toastTimeout);
+                this.toastTimeout = setTimeout(() => {
+                    toast.classList.add('opacity-0');
+                }, 2500);
+            }
+
+            startGame() {
+                this.audio.init();
+                this.audio.playClick();
+
+                // Reset Stats
+                this.isPlaying = true;
+                this.isGameOver = false;
+                this.startTime = performance.now();
+                this.stamina = 100;
+                this.battery = 100;
+                this.flashlightOn = true;
+                this.flashlight.visible = true;
+                this.tapesCollected = 0;
+                this.exitUnlocked = false;
+                this.yaw = -Math.PI / 2;
+                this.pitch = 0;
+
+                this.buildLevel();
+                this.updateHUD();
+
+                // Show HUD
+                document.getElementById('menu-screen').classList.add('hidden');
+                document.getElementById('end-screen').classList.add('hidden');
+                document.getElementById('jumpscare-screen').classList.add('hidden');
+                document.getElementById('hud-topbar').classList.remove('hidden');
+                document.getElementById('crosshair-container').classList.remove('hidden');
+
+                if (this.isTouchDevice) {
+                    document.getElementById('mobile-controls').classList.remove('hidden');
+                } else {
+                    this.canvas.requestPointerLock?.();
+                }
+
+                this.showToast("Find all 5 Golden Tickets to unlock the Circus Gate!");
+            }
+
+            triggerClownJumpscare() {
+                if (this.isGameOver) return;
+                this.isPlaying = false;
+                this.isGameOver = true;
+
+                if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                }
+
+                // Hide regular HUD
+                document.getElementById('hud-topbar').classList.add('hidden');
+                document.getElementById('crosshair-container').classList.add('hidden');
+                document.getElementById('mobile-controls').classList.add('hidden');
+                document.getElementById('danger-overlay').style.opacity = '0';
+
+                // Play Clown Jumpscare Screen & Audio
+                const scareScreen = document.getElementById('jumpscare-screen');
+                scareScreen.classList.remove('hidden');
+                this.audio.playClownJumpscare();
+
+                // After 1.65 seconds of jumpscare, transition to Game Over Death Screen
+                setTimeout(() => {
+                    scareScreen.classList.add('hidden');
+                    this.showEndScreen(false);
+                }, 1650);
+            }
+
+            endGame(won) {
+                this.isPlaying = false;
+                this.isGameOver = true;
+                if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                }
+
+                document.getElementById('hud-topbar').classList.add('hidden');
+                document.getElementById('crosshair-container').classList.add('hidden');
+                document.getElementById('mobile-controls').classList.add('hidden');
+                document.getElementById('danger-overlay').style.opacity = '0';
+
+                this.showEndScreen(won);
+            }
+
+            showEndScreen(won) {
+                const endScreen = document.getElementById('end-screen');
+                const badge = document.getElementById('end-badge');
+                const title = document.getElementById('end-title');
+                const desc = document.getElementById('end-desc');
+
+                if (won) {
+                    this.audio.playPickup();
+                    badge.textContent = "ESCAPED THE CIRCUS";
+                    badge.className = "inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mb-3 bg-emerald-500/20 text-emerald-400";
+                    title.textContent = "YOU SURVIVED THE SHOW";
+                    desc.textContent = "You collected all 5 Golden Tickets and escaped the big top.";
+                } else {
+                    badge.textContent = "YOU DIED";
+                    badge.className = "inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mb-3 bg-red-500/20 text-red-400";
+                    title.textContent = "CAUGHT BY BOBO THE CLOWN";
+                    desc.textContent = "The show never ends for those left behind in the tent.";
+                }
+
+                const mins = Math.floor(this.elapsedTime / 60).toString().padStart(2, '0');
+                const secs = Math.floor(this.elapsedTime % 60).toString().padStart(2, '0');
+                document.getElementById('stat-tapes').textContent = `${this.tapesCollected} / ${this.totalTapes}`;
+                document.getElementById('stat-time').textContent = `${mins}:${secs}`;
+
+                endScreen.classList.remove('hidden');
+            }
+
+            toggleFlashlight() {
+                if (!this.isPlaying) return;
+                if (this.battery <= 0) {
+                    this.showToast("Flashlight battery depleted!");
+                    return;
+                }
+                this.flashlightOn = !this.flashlightOn;
+                this.flashlight.visible = this.flashlightOn;
+                this.audio.playClick();
+            }
+
+            collectTargetedTape() {
+                if (!this.isPlaying || !this.targetedTape || this.targetedTape.collected) return;
+
+                this.targetedTape.collected = true;
+                this.targetedTape.group.visible = false;
+                this.tapesCollected++;
+                this.audio.playPickup();
+
+                // Recharge a bit of battery on tape pickup as a reward
+                this.battery = Math.min(100, this.battery + 25);
+
+                if (this.tapesCollected >= this.totalTapes) {
+                    this.exitUnlocked = true;
+                    this.exitSignMat.color.setHex(0x10b981);
+                    this.exitSignMat.emissive.setHex(0x059669);
+                    this.exitLight.color.setHex(0x10b981);
+                    this.showToast("ALL TICKETS FOUND! Run to the GREEN EXIT GATE!");
+                    // Clown gets faster when exit opens
+                    this.monsterSpeed = 5.6;
+                } else {
+                    this.showToast(`Golden Ticket Collected (${this.tapesCollected}/${this.totalTapes})`);
+                }
+
+                this.updateHUD();
+            }
+
+            updateHUD() {
+                const objText = document.getElementById('objective-text');
+                if (this.exitUnlocked) {
+                    objText.textContent = "ESCAPE THROUGH THE GREEN EXIT GATE!";
+                    objText.classList.add('text-emerald-400');
+                } else {
+                    objText.textContent = `Find 5 Golden Tickets (${this.tapesCollected}/${this.totalTapes})`;
+                    objText.classList.remove('text-emerald-400');
+                }
+            }
+
+            checkWallCollision(x, z, radius) {
+                for (let i = 0; i < this.walls.length; i++) {
+                    const w = this.walls[i];
+                    const closestX = Math.max(w.minX, Math.min(x, w.maxX));
+                    const closestZ = Math.max(w.minZ, Math.min(z, w.maxZ));
+                    const dx = x - closestX;
+                    const dz = z - closestZ;
+                    if ((dx * dx + dz * dz) < (radius * radius)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            bindEvents() {
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+
+                document.getElementById('btn-play').addEventListener('click', () => this.startGame());
+                document.getElementById('btn-restart').addEventListener('click', () => this.startGame());
+                
+                document.getElementById('btn-pause').addEventListener('click', () => {
+                    if (document.pointerLockElement) document.exitPointerLock();
+                    this.showToast("Click canvas to resume mouse look");
+                });
+
+                // Keyboard Controls
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    if (e.code === 'KeyF') this.toggleFlashlight();
+                    if (e.code === 'KeyE') this.collectTargetedTape();
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+
+                // Mouse Look & Click Actions
+                window.addEventListener('mousemove', (e) => {
+                    if (!this.isPlaying) return;
+                    if (document.pointerLockElement === this.canvas) {
+                        const sensitivity = 0.0022;
+                        this.yaw -= e.movementX * sensitivity;
+                        this.pitch -= e.movementY * sensitivity;
+                        this.pitch = Math.max(-Math.PI / 2.3, Math.min(Math.PI / 2.3, this.pitch));
+                    }
+                });
+
+                this.canvas.addEventListener('mousedown', (e) => {
+                    if (!this.isPlaying) return;
+                    if (!this.isTouchDevice && document.pointerLockElement !== this.canvas) {
+                        this.canvas.requestPointerLock?.();
+                        return;
+                    }
+                    if (e.button === 0) this.collectTargetedTape();
+                    if (e.button === 2) this.toggleFlashlight();
+                });
+
+                window.addEventListener('contextmenu', e => e.preventDefault());
+
+                // Touch Controls (Virtual Joystick + Swipe Look)
+                this.setupTouchControls();
+            }
+
+            setupTouchControls() {
+                const joyZone = document.getElementById('joystick-zone');
+                const joyKnob = document.getElementById('joystick-knob');
+                let joyTouchId = null;
+                let lookTouchId = null;
+                let lastLookX = 0;
+                let lastLookY = 0;
+
+                joyZone.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    const touch = e.changedTouches[0];
+                    joyTouchId = touch.identifier;
+                    this.updateJoystick(touch, joyZone, joyKnob);
+                });
+
+                joyZone.addEventListener('touchmove', (e) => {
+                    e.preventDefault();
+                    for (let t of e.changedTouches) {
+                        if (t.identifier === joyTouchId) {
+                            this.updateJoystick(t, joyZone, joyKnob);
+                        }
+                    }
+                });
+
+                const resetJoy = (e) => {
+                    for (let t of e.changedTouches) {
+                        if (t.identifier === joyTouchId) {
+                            joyTouchId = null;
+                            this.joyVector = { x: 0, y: 0 };
+                            joyKnob.style.transform = `translate(-50%, -50%)`;
+                        }
+                    }
+                };
+                joyZone.addEventListener('touchend', resetJoy);
+                joyZone.addEventListener('touchcancel', resetJoy);
+
+                // Touch Look on Canvas
+                this.canvas.addEventListener('touchstart', (e) => {
+                    if (!this.isPlaying) return;
+                    for (let t of e.changedTouches) {
+                        if (lookTouchId === null && t.clientX > window.innerWidth * 0.35) {
+                            lookTouchId = t.identifier;
+                            lastLookX = t.clientX;
+                            lastLookY = t.clientY;
+                        }
+                    }
+                });
+
+                this.canvas.addEventListener('touchmove', (e) => {
+                    if (!this.isPlaying) return;
+                    for (let t of e.changedTouches) {
+                        if (t.identifier === lookTouchId) {
+                            const dx = t.clientX - lastLookX;
+                            const dy = t.clientY - lastLookY;
+                            lastLookX = t.clientX;
+                            lastLookY = t.clientY;
+                            this.yaw -= dx * 0.0055;
+                            this.pitch -= dy * 0.0055;
+                            this.pitch = Math.max(-Math.PI / 2.3, Math.min(Math.PI / 2.3, this.pitch));
+                        }
+                    }
+                });
+
+                this.canvas.addEventListener('touchend', (e) => {
+                    for (let t of e.changedTouches) {
+                        if (t.identifier === lookTouchId) lookTouchId = null;
+                    }
+                });
+
+                // Mobile Buttons
+                document.getElementById('btn-mobile-flash').addEventListener('click', () => this.toggleFlashlight());
+                document.getElementById('btn-mobile-interact').addEventListener('click', () => this.collectTargetedTape());
+                
+                const sprintBtn = document.getElementById('btn-mobile-sprint');
+                sprintBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.keys['ShiftLeft'] = true; });
+                sprintBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.keys['ShiftLeft'] = false; });
+            }
+
+            updateJoystick(touch, zone, knob) {
+                const rect = zone.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                const maxDist = rect.width / 2;
+
+                let dx = touch.clientX - centerX;
+                let dy = touch.clientY - centerY;
+                const dist = Math.hypot(dx, dy);
+
+                if (dist > maxDist) {
+                    dx = (dx / dist) * maxDist;
+                    dy = (dy / dist) * maxDist;
+                }
+
+                knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                this.joyVector.x = dx / maxDist;
+                this.joyVector.y = dy / maxDist;
+            }
+
+            updatePlayer(dt) {
+                // Movement Input
+                let moveForward = 0;
+                let moveRight = 0;
+
+                if (this.keys['KeyW'] || this.keys['ArrowUp']) moveForward += 1;
+                if (this.keys['KeyS'] || this.keys['ArrowDown']) moveForward -= 1;
+                if (this.keys['KeyD'] || this.keys['ArrowRight']) moveRight += 1;
+                if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveRight -= 1;
+
+                // Blend Mobile Joystick
+                if (Math.abs(this.joyVector.y) > 0.1) moveForward -= this.joyVector.y;
+                if (Math.abs(this.joyVector.x) > 0.1) moveRight += this.joyVector.x;
+
+                const isMoving = Math.hypot(moveForward, moveRight) > 0.05;
+                const wantsSprint = (this.keys['ShiftLeft'] || this.keys['ShiftRight']) && isMoving;
+
+                if (wantsSprint && this.stamina > 0) {
+                    this.isSprinting = true;
+                    this.stamina = Math.max(0, this.stamina - 28 * dt);
+                } else {
+                    this.isSprinting = false;
+                    this.stamina = Math.min(100, this.stamina + 16 * dt);
+                }
+
+                const speed = this.isSprinting ? 8.2 : 4.8;
+
+                // Calculate World Direction Vectors
+                const forwardVec = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+                const rightVec = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+
+                const velocity = new THREE.Vector3()
+                    .addScaledVector(forwardVec, moveForward)
+                    .addScaledVector(rightVec, moveRight);
+
+                if (velocity.length() > 1) velocity.normalize();
+                velocity.multiplyScalar(speed * dt);
+
+                // Sliding Wall Collision (X and Z separately)
+                const nextX = this.playerPos.x + velocity.x;
+                if (!this.checkWallCollision(nextX, this.playerPos.z, this.playerRadius)) {
+                    this.playerPos.x = nextX;
+                }
+
+                const nextZ = this.playerPos.z + velocity.z;
+                if (!this.checkWallCollision(this.playerPos.x, nextZ, this.playerRadius)) {
+                    this.playerPos.z = nextZ;
+                }
+
+                // Head Bobbing
+                if (isMoving) {
+                    this.bobTimer += dt * (this.isSprinting ? 14 : 9);
+                    this.playerPos.y = 2.2 + Math.sin(this.bobTimer) * 0.09;
+                } else {
+                    this.playerPos.y += (2.2 - this.playerPos.y) * 10 * dt;
+                }
+
+                // Apply Transform to Camera
+                this.camera.position.copy(this.playerPos);
+                const euler = new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ');
+                this.camera.quaternion.setFromEuler(euler);
+
+                // Flashlight Battery Drain
+                if (this.flashlightOn) {
+                    this.battery = Math.max(0, this.battery - 1.65 * dt);
+                    // Flicker when low
+                    if (this.battery < 20 && Math.random() < 0.12) {
+                        this.flashlight.intensity = Math.random() * 2.5;
+                    } else {
+                        this.flashlight.intensity = 3.2;
+                    }
+                    if (this.battery <= 0) {
+                        this.flashlightOn = false;
+                        this.flashlight.visible = false;
+                        this.showToast("Flashlight battery died!");
+                    }
+                }
+
+                // Update HUD Bars
+                document.getElementById('stamina-bar').style.width = `${this.stamina}%`;
+                document.getElementById('battery-bar').style.width = `${this.battery}%`;
+
+                // Check Exit Win Condition
+                if (this.exitUnlocked && this.exitDoor) {
+                    const distToExit = Math.hypot(this.playerPos.x - this.exitDoor.x, this.playerPos.z - this.exitDoor.z);
+                    if (distToExit < 3.4) {
+                        this.endGame(true);
+                    }
+                }
+            }
+
+            updateTapesAndInteraction(time) {
+                let closestTape = null;
+                let closestDist = 3.8; // Interaction range
+
+                for (let tape of this.tapes) {
+                    if (tape.collected) continue;
+
+                    // Floating rotation animation
+                    tape.mesh.rotation.y = time * 2;
+                    tape.mesh.position.y = 1.35 + Math.sin(time * 3) * 0.08;
+
+                    const dist = Math.hypot(this.playerPos.x - tape.pos.x, this.playerPos.z - tape.pos.z);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestTape = tape;
+                    }
+                }
+
+                this.targetedTape = closestTape;
+                const prompt = document.getElementById('interact-prompt');
+                const mobileBtn = document.getElementById('btn-mobile-interact');
+
+                if (closestTape) {
+                    prompt.classList.remove('hidden');
+                    mobileBtn.classList.remove('hidden');
+                } else {
+                    prompt.classList.add('hidden');
+                    mobileBtn.classList.add('hidden');
+                }
+            }
+
+            updateMonster(dt, time) {
+                if (!this.monster) return;
+
+                const mx = this.monster.position.x;
+                const mz = this.monster.position.z;
+                const dx = this.playerPos.x - mx;
+                const dz = this.playerPos.z - mz;
+                const distToPlayer = Math.hypot(dx, dz);
+
+                // Kill check -> Trigger Clown Jumpscare then Death Screen
+                if (distToPlayer < 1.55) {
+                    this.triggerClownJumpscare();
+                    return;
+                }
+
+                // Danger Proximity Heartbeat & Red Screen Pulse
+                const dangerOverlay = document.getElementById('danger-overlay');
+                if (distToPlayer < 18) {
+                    const intensity = 1 - (distToPlayer / 18);
+                    dangerOverlay.style.opacity = (intensity * 0.85).toFixed(2);
+                    
+                    this.audio.heartbeatTimer -= dt;
+                    if (this.audio.heartbeatTimer <= 0) {
+                        this.audio.playHeartbeat(intensity);
+                        this.audio.heartbeatTimer = Math.max(0.32, 1.1 - intensity * 0.75);
+                    }
+                } else {
+                    dangerOverlay.style.opacity = '0';
+                }
+
+                // Stalker Navigation (Smart corridor steering toward player)
+                const dirX = dx / distToPlayer;
+                const dirZ = dz / distToPlayer;
+                const step = this.monsterSpeed * dt;
+
+                // Try direct move, or slide along walls to navigate corners
+                let moved = false;
+                if (!this.checkWallCollision(mx + dirX * step, mz + dirZ * step, 0.85)) {
+                    this.monster.position.x += dirX * step;
+                    this.monster.position.z += dirZ * step;
+                    moved = true;
+                } else {
+                    // Slide X
+                    if (!this.checkWallCollision(mx + Math.sign(dirX) * step, mz, 0.85)) {
+                        this.monster.position.x += Math.sign(dirX) * step;
+                        moved = true;
+                    }
+                    // Slide Z
+                    if (!this.checkWallCollision(mx, mz + Math.sign(dirZ) * step, 0.85)) {
+                        this.monster.position.z += Math.sign(dirZ) * step;
+                        moved = true;
+                    }
+                }
+
+                // Rotate monster smoothly toward player
+                const targetAngle = Math.atan2(dx, dz);
+                this.monster.rotation.y = targetAngle;
+
+                // Creepy Limbs Walk Cycle
+                if (moved) {
+                    this.leftLeg.rotation.x = Math.sin(time * 9) * 0.5;
+                    this.rightLeg.rotation.x = -Math.sin(time * 9) * 0.5;
+                    this.leftArm.rotation.x = -0.35 + Math.cos(time * 9) * 0.25;
+                    this.rightArm.rotation.x = -0.35 - Math.cos(time * 9) * 0.25;
+                }
+            }
+
+            animate(now) {
+                requestAnimationFrame(this.animate);
+
+                const dt = Math.min(0.05, (now - (this.lastFrame || now)) / 1000);
+                this.lastFrame = now;
+                const time = now / 1000;
+
+                if (this.isPlaying && !this.isGameOver) {
+                    this.elapsedTime = (now - this.startTime) / 1000;
+                    this.updatePlayer(dt);
+                    this.updateTapesAndInteraction(time);
+                    this.updateMonster(dt, time);
+                } else {
+                    // Idle camera pan in menu background
+                    this.camera.position.set(12, 3.2, 12);
+                    this.camera.lookAt(18 + Math.sin(time * 0.3) * 4, 2.5, 18);
+                }
+
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // Launch on Window Load
+        window.onload = function () {
+            const game = new HorrorGame();
+            game.animate(performance.now());
+        };
+    </script>
+</body>
+</html>
